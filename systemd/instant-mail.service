@@ -1,0 +1,17 @@
+[Unit]
+Description=Instant mail - A simple mail server for developing & testing
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+
+ExecStartPre=-/bin/bash -c "/bin/grep -Eq '^instant-mail$' < <(/usr/bin/docker ps --format '{{.Names}}') && /usr/bin/docker stop instant-mail && /usr/bin/docker rm instant-mail"
+
+ExecStart=/bin/sh -c "/usr/bin/docker run --rm -e TZ=`/bin/timedatectl | /bin/grep 'Time zone:' | /bin/awk '{print $3}'` -p 25:25 -p 110:110 -p 143:143 -v /etc/instant-mail:/etc/mail --name instant-mail littleforest.jp/instant-mail:instant-mail"
+
+ExecStop=/usr/bin/docker stop instant-mail
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

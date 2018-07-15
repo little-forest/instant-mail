@@ -1,0 +1,61 @@
+#!/bin/sh
+
+POSTFIX_CONF=/etc/postfix/main.cf
+MAIL_USERS=/etc/mail/users
+VMAILBOX=/etc/postfix/vmailbox
+DOVECOT_USERS=/etc/dovecot/users
+
+_list_domains() {
+  sed -nre 's|^[ \t]*\[([^]]+)\][ \t]*$|\1|p'
+}
+
+_get_section() {
+  local SECTION="$1"
+  local INI_FILE="$2"
+  local SECTION_PAT="^[ \t]*\[${SECTION}\][ \t]*$"
+  local SECTION_END_PAT='^[ \t]*\[[^]]+\][ \t]*$'
+   
+  cat "$INI_FILE" | \
+    sed -nre "/${SECTION_PAT}/{:LOOP;n;/${SECTION_END_PAT}/Q;p;b LOOP}" | \
+    sed -re '/^[ \t]*$/d;/^[ \t]*[#;].*/d;s/[#;].*$//;s/^[ \t]+//;s/[ \t]+$//'
+}
+
+_create_userdata() {
+  cat $MAIL_USERS | _list_domains | while read DOMAIN; do
+    _get_section "${DOMAIN}" "${MAIL_USERS}" | while read USER PASS; do
+      [ -z "$PASS" ] && PASS="${USER}"
+      MAILADDR="${USER}@${DOMAIN}"
+      MAILBOX="${DOMAIN}/${USER}/"
+
+      echo "${MAILADDR} ${MAILBOX}" >> $VMAILBOX
+      echo "${MAILADDR}:{PLAIN}${PASS}" >> $DOVECOT_USERS
+    done
+  done 
+}
+
+#-----------------------------------------------------------
+# set timezone
+#-----------------------------------------------------------
+ZONEINFO="/usr/share/zoneinfo/$TZ"
+if [ -n "$TZ" ] && [ -f "$ZONEINFO" ]; then
+  cp "$ZONEINFO" /etc/localtime
+fi
+
+#-----------------------------------------------------------
+# Adjust postfix configuration
+#-----------------------------------------------------------
+VIRTUAL_DOMAINS=`_list_domains < "$MAIL_USERS" | xargs | sed -e 's/ /, /g'`
+MY_HOSTNAME=`hostname`
+
+sed -i -re "s/%%MY_HOSTNAME%%/${MY_HOSTNAME}/" $POSTFIX_CONF
+sed -i -re "s/%%VIRTUAL_DOMAINS%%/${VIRTUAL_DOMAINS}/" $POSTFIX_CONF
+
+#-----------------------------------------------------------
+# create Postfix/Dovecot file
+#-----------------------------------------------------------
+_create_userdata
+
+/usr/sbin/postmap "$VMAILBOX"
+
+/usr/bin/newaliases
+
